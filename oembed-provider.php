@@ -10,6 +10,8 @@ define('OE_PROVIDER_DEFAULT_WIDTH', 600);
 define('OE_PROVIDER_DEFAULT_HEIGHT', 400);
 define('OE_PROVIDER_DEFAULT_FORMAT', 'json');
 
+define('REQUEST_TIMEOUT_SECS', 5);
+
 define('ERR_MSG', [
     400 => 'Bad Request',
     401 => 'Unauthorized',
@@ -50,9 +52,12 @@ function is_valid_scheme($url, $converted_schemes){
     return false;
 }
 
-function info_extractor($url,$type){
+function info_extractor($url,$type,$stream_context){
     if($type === 'link' || $type === 'rich'){
-        $html = file_get_contents($url);
+        $html = file_get_contents($url, false, $stream_context);
+    }
+    if($html === false){
+        return ['Untitled', ''];
     }
     if($type === 'link'){
         if(preg_match('/<meta\s+property=["\']og:image["\']\s+content=["\'](.*?)["\']\s*\/?>/is', $html, $matches)){
@@ -88,11 +93,18 @@ $url = urldecode($_GET['url']);
 
 $converted_schemes = convert_schemes(OE_PROVIDER_SCHEMES);
 
+$stream_context = stream_context_create([
+    'http' => [
+        'method' => 'GET',
+        'timeout' => REQUEST_TIMEOUT_SECS
+    ]
+]);
+
 if(!is_valid_scheme($url, $converted_schemes)){
     err_response(400, $format);
 }
 
-$target_headers = get_headers($url, 1);
+$target_headers = @get_headers($url, 1, $stream_context);
 if($target_headers === false){
     err_response(400, $format);
 }
@@ -139,7 +151,7 @@ if(!isset($_GET['height']) && !isset($_GET['maxheight'])){
     $height = OE_PROVIDER_DEFAULT_HEIGHT;
 }
 
-[$title, $ogp_image] = info_extractor($url, $type);
+[$title, $ogp_image] = info_extractor($url, $type, $stream_context);
 
 $response = [
     'version' => OE_PROVIDER_VERSION,
@@ -183,7 +195,7 @@ if($format === 'json'){
     echo json_encode($response);
 } else if($format === 'xml'){
     header('Content-Type: application/xml');
-    $xml = new SimpleXMLElement('<oembed/>');
+    $xml = new SimpleXMLElement('<?xml version="1.0" encoding="utf-8" standalone="yes"?><oembed/>');
     array_walk_recursive($response, function($value, $key) use ($xml){
         $xml->addChild($key, htmlspecialchars($value));
     });
